@@ -1,0 +1,233 @@
+---
+title: "Hands on Data Analysis with R"
+author: "Hossein Moradi Rekabdarkolaee"
+date: "2023-04-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+**Genral**
+```{r}
+print("Statistics get a lot easier with R")
+
+m <- 1:100
+em <- (1+1/m)^m
+
+print(em)
+
+plot(m,em)
+lines(m,em,col="red")
+```
+#Import Libraries
+```{r}
+library(ggplot2)
+library(dplyr) 
+library(knitr)
+library(markdown)
+```
+
+
+```{r}
+
+tr.data <- read.csv("~/Desktop/Research/Papers/Submitted Work/Richard/Other files/Data-Working/Yield DATA_Landsat_NDVI_Dpk.csv")
+
+# cord <- scale(tr.data[,c(4,5)])
+# 
+# dd <- data.frame(Lat = cord[,1], Lon = cord[,2], tr.data[,c(6:18)])
+# 
+# write.csv(dd,"~/Desktop/Courses/Short Course -- Data Analysis with R workshop/Material for Spring 2023/working-data.csv")
+for(i in 4:ncol(tr.data)){
+  tr.data[,i] <- as.numeric(tr.data[,i])
+}
+
+hist(tr.data$Yield, breaks = 30)
+
+q.yield <- cut(tr.data$Yield, breaks = c(41,175.7, 206.86, 231.12,300), labels = c(1,2,3,4))
+
+tr.data1 <- data.frame(tr.data, Q.Yield = q.yield)
+
+ggplot(tr.data1, aes(x=Yield,color=Q.Yield)) + 
+  geom_histogram()+
+  facet_wrap(~Q.Yield)
+
+ggplot(tr.data1, aes(x=Yield,color=Q.Yield)) + 
+  geom_density(lwd =2)
+
+library(fields)
+
+quilt.plot(tr.data1$Latitude, tr.data1$Longitude, tr.data1$Yield)
+
+
+
+```
+
+
+
+```{r}
+
+library(dplyr)
+
+#dt <- aggregate(Yield ~ Latitude + Longitude, tr.data, mean)
+# dt <- tr.data %>%
+#   group_by(Blue_June5) %>%
+#   summarise(lat = mean(Latitude), lon = mean(Longitude), Yield = mean(Yield),
+#             blue6 = unique(Blue_June5), blue7 = unique(Blue_July7), blue8 = unique(Blue_August8),
+#             NIR6 = unique(NIR_June5), NIR7 = unique(NIR_July7), NIR8 = unique(NIR_August8),
+#             red6 = unique(Red_June5), red7 = unique(Red_July7), red8 = unique(Red_August8),
+#             green6 = unique(Green_June5), green7 = unique(Green_July7), green8 = unique(Green_August8))
+
+
+w.dt <- tr.data %>%
+  group_by(Blue_June5) %>%
+  summarise(lat = mean(Latitude), lon = mean(Longitude), Yield = mean(Yield),
+            blue6 = mean(Blue_June5), blue7 = mean(Blue_July7), blue8 = mean(Blue_August8),
+            NIR6 = mean(NIR_June5), NIR7 = mean(NIR_July7), NIR8 = mean(NIR_August8),
+            red6 = mean(Red_June5), red7 = mean(Red_July7), red8 = mean(Red_August8),
+            green6 = mean(Green_June5), green7 = mean(Green_July7), green8 = mean(Green_August8))
+
+w.dt <- w.dt[,-1]
+
+library('corrplot')
+
+corrplot.mixed(cor(w.dt))
+
+
+
+
+t.test(w.dt$blue6, w.dt$blue7, paired = T)
+
+b1 <- cbind(w.dt$blue6,1)
+b2 <- cbind(w.dt$blue7,2)
+b3 <- cbind(w.dt$blue8,3)
+
+dd <- rbind(b1,b2,b3)
+
+summary(aov(dd[,1] ~ dd[,2]))
+# library(fields)
+# 
+# quilt.plot(w.dt$lat, w.dt$lon, w.dt$Yield, nx=23, ny=25)
+
+```
+
+
+```{r}
+
+# ind <- sample(1:nrow(tr.data1), 0.7*nrow(tr.data1))
+# 
+# train.d <- tr.data[ind,c(4:21)]
+# test.d <- tr.data[-ind,c(4:21)]
+
+ind <- sample(1:nrow(w.dt), 0.7*nrow(w.dt))
+
+train.d <- w.dt[ind, ]
+test.d <- w.dt[-ind, ]
+
+model <- lm(Yield ~ . , data = train.d)
+summary(model)
+
+plot(model$fitted.values,model$residuals)
+abline(h=0)
+
+error <- model$residuals
+
+qqnorm(error, 
+       ylab="Standardized Residuals", 
+       xlab="Normal Scores", 
+       main="Regression is the Best") 
+qqline(error) 
+
+shapiro.test(error)
+
+
+p.y.lm <- predict(model, newdata = test.d)
+
+mean((p.y.lm-test.d$Yield)^2)
+
+
+
+#### Sequential Procedure
+
+### full model
+
+
+fit1<-lm(Yield ~ ., data=train.d)
+
+### null model
+fit0<-lm(Yield ~ 1, data=train.d)
+
+##  Forward Selection
+
+fit.forward<-step(fit0,scope=list(lower=Yield ~ 1, upper=fit1),direction='forward')
+
+summary(fit.forward)
+
+### backward selection
+fit.backward<-step(fit1,scope=list(lower=Yield ~ 1, upper=fit1),direction='backward')
+summary(fit.backward)
+
+### stepwise regression by AIC criterion
+fit.both<-step(fit0,scope=list(lower=Yield ~ 1, upper=fit1),direction='both')
+summary(fit.both)
+
+library(pls)
+
+PCR.model <- pcr(Yield ~ ., data = train.d, validation = "LOO")
+
+best.k <- which.min(PCR.model$validation$PRESS)
+best.k
+
+
+validationplot(PCR.model)
+
+validationplot(PCR.model, val.type="MSEP")
+validationplot(PCR.model, val.type = "R2")
+
+
+predplot(PCR.model)
+
+coefplot(PCR.model)
+
+PCR.model$coefficients[,,best.k]
+
+plot(PCR.model$coefficients[,,best.k])
+
+
+### Ridge Regression
+library(glmnet)
+
+lambdas <- 10^seq(2, -3, by = -.1)
+ridge_reg = glmnet(train.d[,-3], train.d$Yield, nlambda = 25, alpha = 0, family = 'gaussian', lambda = lambdas)
+
+summary(ridge_reg)
+
+cv_ridge <- cv.glmnet(as.matrix(train.d[,-3]), train.d$Yield, alpha = 0, lambda = lambdas)
+optimal_lambda1 <- cv_ridge$lambda.min
+optimal_lambda1
+
+pr.r <- predict(ridge_reg, s = optimal_lambda1, newx = as.matrix(test.d[,-3]))
+
+mean((pr.r - test.d$Yield)^2)
+
+### Lasso Regression
+lambdas <- 10^seq(2, -3, by = -.1)
+
+# Setting alpha = 1 implements lasso regression
+lasso_reg <- cv.glmnet(as.matrix(train.d[,-3]), train.d$Yield, alpha = 1, lambda = lambdas, standardize = TRUE, nfolds = 5)
+
+# Best 
+lambda_best <- lasso_reg$lambda.min 
+lambda_best
+
+pr.l <- predict(lasso_reg, s = lambda_best, newx = as.matrix(test.d[,-3]))
+
+mean((pr.l - test.d$Yield)^2)
+
+
+
+```
+
+
